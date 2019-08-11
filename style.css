@@ -3,9 +3,10 @@ html {
   background: #111;
 }
 
-.ct-label {
+.ct-label, .ct-grid {
   color: rgba(255,255,255,0.4);
   fill: rgba(255,255,255,0.4);
+  stroke: rgba(255,255,255,0.4);
 }
 
 footer {
