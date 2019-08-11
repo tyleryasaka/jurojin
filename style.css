@@ -1,0 +1,27 @@
+html {
+  font-family: Roboto;
+}
+
+h1, h2 {
+  text-align: center;
+  font-weight: normal;
+}
+
+h1 {
+  margin-bottom: 0;
+  color: #444;
+}
+
+h2 {
+  font-size: 1.2em;
+  color: #ccc;
+  margin-top: 5px;
+}
+
+.ct-series-c .ct-line, .ct-series-c .ct-point {
+  stroke: #F21010;
+}
+
+.ct-series-a .ct-line, .ct-series-b .ct-line {
+  stroke: #EBD0D0;
+}

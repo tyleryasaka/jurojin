@@ -1,1 +1,1 @@
-# minogame
+# 寿老人 (Jurōjin)
