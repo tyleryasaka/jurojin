@@ -21,20 +21,18 @@ function auth (cb) {
   })
 }
 
-function getHR (duration, bucketByTime) {
-  const now = new Date().getTime()
-  const startTime = now - duration
+function getHR (startTime, endTime, bucketByTime) {
   return window.gapi.client.request({
     method: 'POST',
     path: 'https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate',
     body: {
       aggregateBy: [{
         dataTypeName: 'com.google.heart_rate.bpm',
-        dataSourceId: 'derived:com.google.heart_rate.bpm:com.google.android.gms:merge_heart_rate_bpm'
+        dataSourceId: 'raw:com.google.heart_rate.bpm:nl.appyhapps.healthsync:HealthSync - heart rate'
       }],
       bucketByTime: { durationMillis: bucketByTime },
       startTimeMillis: startTime,
-      endTimeMillis: now
+      endTimeMillis: endTime
     }
   }).then(res => {
     return res.result.bucket.map(item => {
@@ -61,19 +59,70 @@ function getHR (duration, bucketByTime) {
   })
 }
 
-function getHRDay () {
-  const msPerHour = 3600000
-  const msPerDay = 86400000
-  return getHR(msPerDay, msPerHour)
+function getSleep (startTime, endTime) {
+  return window.gapi.client.request({
+    method: 'POST',
+    path: 'https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate',
+    body: {
+      aggregateBy: [{
+        dataTypeName: 'com.google.activity.summary',
+        dataSourceId: 'raw:com.google.activity.segment:nl.appyhapps.healthsync:'
+      }],
+      startTimeMillis: startTime,
+      endTimeMillis: endTime
+    }
+  }).then(res => {
+    const lastInBucket = res && res.result && res.result.bucket && res.result.bucket.length && res.result.bucket[res.result.bucket.length - 1]
+    const points = lastInBucket && lastInBucket.dataset && lastInBucket.dataset.length && lastInBucket.dataset[0] && lastInBucket.dataset[0].point
+    return points.map(point => {
+      const startTime = Number(point.startTimeNanos) / 1000000
+      const endTime = Number(point.endTimeNanos) / 1000000
+      const cycleCode = point &&
+        point.value &&
+        point.value.length &&
+        point.value[0] &&
+        point.value[0].intVal
+      let cycleString
+      if (cycleCode === 109) {
+        cycleString = 'light'
+      } else if (cycleCode === 110) {
+        cycleString = 'deep'
+      } else if (cycleCode === 111) {
+        cycleString = 'REM'
+      } else if (cycleCode === 112) {
+        cycleString = 'awake'
+      }
+      return cycleString && {
+        startTime,
+        endTime,
+        cycle: cycleString
+      }
+    }).filter(i => Boolean(i))
+  })
 }
 
-module.exports = { auth, getHRDay }
+function getHRDay () {
+  const msPerHour = 3600000
+  const startTime = moment().startOf('day').subtract(30, 'minutes')
+  const endTime = startTime.clone().add(1, 'day')
+  return getHR(startTime.valueOf(), endTime.valueOf(), msPerHour)
+}
+
+function getSleepDay () {
+  const startTime = moment().startOf('day').subtract(30, 'minutes')
+  const endTime = startTime.clone().add(1, 'day')
+  return getSleep(startTime.valueOf(), endTime.valueOf())
+}
+
+module.exports = { auth, getHRDay, getSleepDay }
 
 },{"moment":28}],2:[function(require,module,exports){
 var moment = require('moment')
 
 function hrChart (bpm) {
-  return new window.Chartist.Line('.ct-chart', {
+  const startOfToday = moment().startOf('day')
+  const endOfToday = startOfToday.clone().add(1, 'day')
+  return new window.Chartist.Line('.ct-chart-hr', {
     series: [
       {
         name: 'bpm-max',
@@ -104,12 +153,14 @@ function hrChart (bpm) {
       }
     ]
   }, {
-    low: 25,
-    high: 175,
+    // low: 25,
+    // high: 175,
     axisX: {
       type: window.Chartist.FixedScaleAxis,
-      divisor: 24,
-      labelInterpolationFnc: function (value) {
+      low: startOfToday.valueOf(),
+      high: endOfToday.valueOf(),
+      divisor: 6,
+      labelInterpolationFnc: function (value, check) {
         return moment(value).format('ha')
       }
     },
@@ -120,14 +171,62 @@ function hrChart (bpm) {
   })
 }
 
-module.exports = { hrChart }
+function sleepChart (cycles) {
+  const startOfToday = moment().startOf('day')
+  const endOfToday = startOfToday.clone().add(1, 'day')
+  const genSeries = (cycleName) => {
+    return {
+      name: cycleName,
+      data: cycles.filter(({ cycle }) => cycle === cycleName).map(({ startTime, endTime }) => {
+        return [{
+          x: startTime,
+          y: 1
+        }, {
+          x: endTime,
+          y: 0
+        }]
+      }).flat()
+    }
+  }
+  return new window.Chartist.Line('.ct-chart-sleep', {
+    series: [
+      genSeries('light'),
+      genSeries('deep'),
+      genSeries('REM'),
+      genSeries('awake')
+    ]
+  }, {
+    // low: 25,
+    // high: 175,
+    axisX: {
+      type: window.Chartist.FixedScaleAxis,
+      low: startOfToday.valueOf(),
+      high: endOfToday.valueOf(),
+      divisor: 6,
+      labelInterpolationFnc: function (value, check) {
+        return moment(value).format('ha')
+      }
+    },
+    axisY: {
+      labelInterpolationFnc: () => {
+        return false
+      }
+    },
+    lineSmooth: window.Chartist.Interpolation.step(),
+    showPoint: false,
+    showArea: true,
+    showLine: false
+  })
+}
+
+module.exports = { hrChart, sleepChart }
 
 },{"moment":28}],3:[function(require,module,exports){
 var html = {}
 var devtools = require('choo-devtools')
 var choo = require('choo')
-var { auth, getHRDay } = require('./api')
-var { hrChart } = require('./charts')
+var { auth, getHRDay, getSleepDay } = require('./api')
+var { hrChart, sleepChart } = require('./charts')
 
 var app = choo()
 app.use(devtools())
@@ -137,19 +236,26 @@ app.mount('#choo')
 
 function loadData (emitter) {
   Promise.all([
-    getHRDay()
+    getHRDay(),
+    getSleepDay()
   ]).then(data => {
     emitter.emit('receiveData', {
-      bpm: data[0]
+      bpm: data[0],
+      cycles: data[1]
     })
   })
 }
 
 function mainView (state, emit) {
   return (function () {
-      var nanohtml0 = document.createElement("div")
-nanohtml0.setAttribute("class", "ct-chart ct-perfect-fourth")
-      return nanohtml0
+      var ac = require('/Users/tyler/repos/jurojin/node_modules/nanohtml/lib/append-child.js')
+      var nanohtml2 = document.createElement("div")
+var nanohtml0 = document.createElement("div")
+nanohtml0.setAttribute("class", "ct-chart ct-chart-hr ct-major-eleventh")
+var nanohtml1 = document.createElement("div")
+nanohtml1.setAttribute("class", "ct-chart ct-chart-sleep ct-major-eleventh")
+ac(nanohtml2, ["\n      ",nanohtml0,"\n      ",nanohtml1,"\n    "])
+      return nanohtml2
     }())
 }
 
@@ -160,13 +266,13 @@ function globalStore (state, emitter) {
     })
   })
 
-  emitter.on('receiveData', function ({ bpm }) {
-    console.log('bpm', bpm)
+  emitter.on('receiveData', function ({ bpm, cycles }) {
     hrChart(bpm)
+    sleepChart(cycles)
   })
 }
 
-},{"./api":1,"./charts":2,"choo":20,"choo-devtools":10}],4:[function(require,module,exports){
+},{"./api":1,"./charts":2,"/Users/tyler/repos/jurojin/node_modules/nanohtml/lib/append-child.js":32,"choo":20,"choo-devtools":10}],4:[function(require,module,exports){
 (function (global){
 'use strict';
 
@@ -676,7 +782,7 @@ var objectKeys = Object.keys || function (obj) {
 };
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"object-assign":42,"util/":7}],5:[function(require,module,exports){
+},{"object-assign":43,"util/":7}],5:[function(require,module,exports){
 if (typeof Object.create === 'function') {
   // implementation from standard node.js 'util' module
   module.exports = function inherits(ctor, superCtor) {
@@ -1298,7 +1404,7 @@ function hasOwnProperty(obj, prop) {
 }
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./support/isBuffer":6,"_process":47,"inherits":5}],8:[function(require,module,exports){
+},{"./support/isBuffer":6,"_process":48,"inherits":5}],8:[function(require,module,exports){
 'use strict'
 
 exports.byteLength = byteLength
@@ -3286,7 +3392,7 @@ function expose (opts) {
   }
 }
 
-},{"./lib/copy":11,"./lib/debug":12,"./lib/help":13,"./lib/log":14,"./lib/logger":15,"./lib/perf":16,"./lib/storage":17,"events":24,"global/window":26,"wayfarer/get-all-routes":51}],11:[function(require,module,exports){
+},{"./lib/copy":11,"./lib/debug":12,"./lib/help":13,"./lib/log":14,"./lib/logger":15,"./lib/perf":16,"./lib/storage":17,"events":24,"global/window":26,"wayfarer/get-all-routes":52}],11:[function(require,module,exports){
 var stateCopy = require('state-copy')
 var pluck = require('plucker')
 
@@ -3302,7 +3408,7 @@ function copy (state) {
   stateCopy(isStateString ? pluck.apply(this, arguments) : state)
 }
 
-},{"plucker":45,"state-copy":50}],12:[function(require,module,exports){
+},{"plucker":46,"state-copy":51}],12:[function(require,module,exports){
 var onChange = require('object-change-callsite')
 var nanologger = require('nanologger')
 var assert = require('assert')
@@ -3343,7 +3449,7 @@ function debug (state, emitter, app, localEmitter) {
   })
 }
 
-},{"assert":4,"nanologger":32,"object-change-callsite":43}],13:[function(require,module,exports){
+},{"assert":4,"nanologger":33,"object-change-callsite":44}],13:[function(require,module,exports){
 module.exports = help
 
 function help () {
@@ -3454,7 +3560,7 @@ function log (state, emitter, app, localEmitter) {
 
 function noop () {}
 
-},{"clone":21,"nanologger":32,"nanoscheduler":40,"remove-array-items":48}],15:[function(require,module,exports){
+},{"clone":21,"nanologger":33,"nanoscheduler":41,"remove-array-items":49}],15:[function(require,module,exports){
 var scheduler = require('nanoscheduler')()
 var nanologger = require('nanologger')
 var Hooks = require('choo-hooks')
@@ -3543,7 +3649,7 @@ function logger (state, emitter, opts) {
   }
 }
 
-},{"choo-hooks":18,"nanologger":32,"nanoscheduler":40}],16:[function(require,module,exports){
+},{"choo-hooks":18,"nanologger":33,"nanoscheduler":41}],16:[function(require,module,exports){
 var onPerformance = require('on-performance')
 
 var BAR = '█'
@@ -3684,7 +3790,7 @@ function getMedian (args) {
 // Do nothing.
 function noop () {}
 
-},{"on-performance":44}],17:[function(require,module,exports){
+},{"on-performance":45}],17:[function(require,module,exports){
 var pretty = require('prettier-bytes')
 
 module.exports = storage
@@ -3727,7 +3833,7 @@ function fmt (num) {
 
 function noop () {}
 
-},{"prettier-bytes":46}],18:[function(require,module,exports){
+},{"prettier-bytes":47}],18:[function(require,module,exports){
 var onPerformance = require('on-performance')
 var scheduler = require('nanoscheduler')()
 var assert = require('assert')
@@ -3872,7 +3978,7 @@ function sumDurations (timings) {
   }, 0).toFixed()
 }
 
-},{"assert":4,"nanoscheduler":40,"on-performance":44}],19:[function(require,module,exports){
+},{"assert":4,"nanoscheduler":41,"on-performance":45}],19:[function(require,module,exports){
 var assert = require('assert')
 var LRU = require('nanolru')
 
@@ -3915,7 +4021,7 @@ function newCall (Cls) {
   return new (Cls.bind.apply(Cls, arguments)) // eslint-disable-line
 }
 
-},{"assert":29,"nanolru":33}],20:[function(require,module,exports){
+},{"assert":29,"nanolru":34}],20:[function(require,module,exports){
 var scrollToAnchor = require('scroll-to-anchor')
 var documentReady = require('document-ready')
 var nanotiming = require('nanotiming')
@@ -4188,7 +4294,7 @@ Choo.prototype._setCache = function (state) {
   }
 }
 
-},{"./component/cache":19,"assert":29,"document-ready":23,"nanobus":30,"nanohref":31,"nanomorph":34,"nanoquery":37,"nanoraf":38,"nanorouter":39,"nanotiming":41,"scroll-to-anchor":49,"xtend":54}],21:[function(require,module,exports){
+},{"./component/cache":19,"assert":29,"document-ready":23,"nanobus":30,"nanohref":31,"nanomorph":35,"nanoquery":38,"nanoraf":39,"nanorouter":40,"nanotiming":42,"scroll-to-anchor":50,"xtend":55}],21:[function(require,module,exports){
 (function (Buffer){
 var clone = (function() {
 'use strict';
@@ -9977,7 +10083,7 @@ Nanobus.prototype._emit = function (arr, eventName, data, uuid) {
   }
 }
 
-},{"assert":29,"nanotiming":41,"remove-array-items":48}],31:[function(require,module,exports){
+},{"assert":29,"nanotiming":42,"remove-array-items":49}],31:[function(require,module,exports){
 var assert = require('assert')
 
 var safeExternalLink = /(noopener|noreferrer) (noopener|noreferrer)/
@@ -10023,6 +10129,141 @@ function href (cb, root) {
 }
 
 },{"assert":29}],32:[function(require,module,exports){
+'use strict'
+
+var trailingNewlineRegex = /\n[\s]+$/
+var leadingNewlineRegex = /^\n[\s]+/
+var trailingSpaceRegex = /[\s]+$/
+var leadingSpaceRegex = /^[\s]+/
+var multiSpaceRegex = /[\n\s]+/g
+
+var TEXT_TAGS = [
+  'a', 'abbr', 'b', 'bdi', 'bdo', 'br', 'cite', 'data', 'dfn', 'em', 'i',
+  'kbd', 'mark', 'q', 'rp', 'rt', 'rtc', 'ruby', 's', 'amp', 'small', 'span',
+  'strong', 'sub', 'sup', 'time', 'u', 'var', 'wbr'
+]
+
+var VERBATIM_TAGS = [
+  'code', 'pre', 'textarea'
+]
+
+module.exports = function appendChild (el, childs) {
+  if (!Array.isArray(childs)) return
+
+  var nodeName = el.nodeName.toLowerCase()
+
+  var hadText = false
+  var value, leader
+
+  for (var i = 0, len = childs.length; i < len; i++) {
+    var node = childs[i]
+    if (Array.isArray(node)) {
+      appendChild(el, node)
+      continue
+    }
+
+    if (typeof node === 'number' ||
+      typeof node === 'boolean' ||
+      typeof node === 'function' ||
+      node instanceof Date ||
+      node instanceof RegExp) {
+      node = node.toString()
+    }
+
+    var lastChild = el.childNodes[el.childNodes.length - 1]
+
+    // Iterate over text nodes
+    if (typeof node === 'string') {
+      hadText = true
+
+      // If we already had text, append to the existing text
+      if (lastChild && lastChild.nodeName === '#text') {
+        lastChild.nodeValue += node
+
+      // We didn't have a text node yet, create one
+      } else {
+        node = document.createTextNode(node)
+        el.appendChild(node)
+        lastChild = node
+      }
+
+      // If this is the last of the child nodes, make sure we close it out
+      // right
+      if (i === len - 1) {
+        hadText = false
+        // Trim the child text nodes if the current node isn't a
+        // node where whitespace matters.
+        if (TEXT_TAGS.indexOf(nodeName) === -1 &&
+          VERBATIM_TAGS.indexOf(nodeName) === -1) {
+          value = lastChild.nodeValue
+            .replace(leadingNewlineRegex, '')
+            .replace(trailingSpaceRegex, '')
+            .replace(trailingNewlineRegex, '')
+            .replace(multiSpaceRegex, ' ')
+          if (value === '') {
+            el.removeChild(lastChild)
+          } else {
+            lastChild.nodeValue = value
+          }
+        } else if (VERBATIM_TAGS.indexOf(nodeName) === -1) {
+          // The very first node in the list should not have leading
+          // whitespace. Sibling text nodes should have whitespace if there
+          // was any.
+          leader = i === 0 ? '' : ' '
+          value = lastChild.nodeValue
+            .replace(leadingNewlineRegex, leader)
+            .replace(leadingSpaceRegex, ' ')
+            .replace(trailingSpaceRegex, '')
+            .replace(trailingNewlineRegex, '')
+            .replace(multiSpaceRegex, ' ')
+          lastChild.nodeValue = value
+        }
+      }
+
+    // Iterate over DOM nodes
+    } else if (node && node.nodeType) {
+      // If the last node was a text node, make sure it is properly closed out
+      if (hadText) {
+        hadText = false
+
+        // Trim the child text nodes if the current node isn't a
+        // text node or a code node
+        if (TEXT_TAGS.indexOf(nodeName) === -1 &&
+          VERBATIM_TAGS.indexOf(nodeName) === -1) {
+          value = lastChild.nodeValue
+            .replace(leadingNewlineRegex, '')
+            .replace(trailingNewlineRegex, ' ')
+            .replace(multiSpaceRegex, ' ')
+
+          // Remove empty text nodes, append otherwise
+          if (value === '') {
+            el.removeChild(lastChild)
+          } else {
+            lastChild.nodeValue = value
+          }
+        // Trim the child nodes if the current node is not a node
+        // where all whitespace must be preserved
+        } else if (VERBATIM_TAGS.indexOf(nodeName) === -1) {
+          value = lastChild.nodeValue
+            .replace(leadingSpaceRegex, ' ')
+            .replace(leadingNewlineRegex, '')
+            .replace(trailingNewlineRegex, '')
+            .replace(multiSpaceRegex, ' ')
+          lastChild.nodeValue = value
+        }
+      }
+
+      // Store the last nodename
+      var _nodeName = node.nodeName
+      if (_nodeName) nodeName = _nodeName.toLowerCase()
+
+      // Append the node to the DOM
+      el.appendChild(node)
+    }
+  }
+}
+
+},{}],33:[function(require,module,exports){
 var assert = require('assert')
 
 var emojis = {
@@ -10187,7 +10428,7 @@ function pad (str) {
   return str.length !== 2 ? 0 + str : str
 }
 
-},{"assert":4}],33:[function(require,module,exports){
+},{"assert":4}],34:[function(require,module,exports){
 module.exports = LRU
 
 function LRU (opts) {
@@ -10325,7 +10566,7 @@ LRU.prototype.evict = function () {
   this.remove(this.tail)
 }
 
-},{}],34:[function(require,module,exports){
+},{}],35:[function(require,module,exports){
 var assert = require('nanoassert')
 var morph = require('./lib/morph')
 
@@ -10490,7 +10731,7 @@ function same (a, b) {
   return false
 }
 
-},{"./lib/morph":36,"nanoassert":29}],35:[function(require,module,exports){
+},{"./lib/morph":37,"nanoassert":29}],36:[function(require,module,exports){
 module.exports = [
   // attribute events (can be set with attributes)
   'onclick',
@@ -10534,7 +10775,7 @@ module.exports = [
   'onfocusout'
 ]
 
-},{}],36:[function(require,module,exports){
+},{}],37:[function(require,module,exports){
 var events = require('./events')
 var eventsLength = events.length
 
@@ -10700,7 +10941,7 @@ function updateAttribute (newNode, oldNode, name) {
   }
 }
 
-},{"./events":35}],37:[function(require,module,exports){
+},{"./events":36}],38:[function(require,module,exports){
 var reg = /([^?=&]+)(=([^&]*))?/g
 var assert = require('assert')
 
@@ -10724,7 +10965,7 @@ function qs (url) {
   return obj
 }
 
-},{"assert":29}],38:[function(require,module,exports){
+},{"assert":29}],39:[function(require,module,exports){
 'use strict'
 
 var assert = require('assert')
@@ -10761,7 +11002,7 @@ function nanoraf (render, raf) {
   }
 }
 
-},{"assert":29}],39:[function(require,module,exports){
+},{"assert":29}],40:[function(require,module,exports){
 var assert = require('assert')
 var wayfarer = require('wayfarer')
 
@@ -10817,7 +11058,7 @@ function pathname (routename, isElectron) {
   return decodeURI(routename.replace(suffix, '').replace(normalize, '/'))
 }
 
-},{"assert":29,"wayfarer":52}],40:[function(require,module,exports){
+},{"assert":29,"wayfarer":53}],41:[function(require,module,exports){
 var assert = require('assert')
 
 var hasWindow = typeof window !== 'undefined'
@@ -10874,7 +11115,7 @@ NanoScheduler.prototype.setTimeout = function (cb) {
 
 module.exports = createScheduler
 
-},{"assert":29}],41:[function(require,module,exports){
+},{"assert":29}],42:[function(require,module,exports){
 var scheduler = require('nanoscheduler')()
 var assert = require('assert')
 
@@ -10924,7 +11165,7 @@ function noop (cb) {
   }
 }
 
-},{"assert":29,"nanoscheduler":40}],42:[function(require,module,exports){
+},{"assert":29,"nanoscheduler":41}],43:[function(require,module,exports){
 /*
 object-assign
 (c) Sindre Sorhus
@@ -11016,7 +11257,7 @@ module.exports = shouldUseNative() ? Object.assign : function (target, source) {
 	return to;
 };
 
-},{}],43:[function(require,module,exports){
+},{}],44:[function(require,module,exports){
 var assert = require('assert')
 
 module.exports = objectChangeCallsite
@@ -11053,7 +11294,7 @@ function strip (str) {
   return '\n' + arr.join('\n')
 }
 
-},{"assert":4}],44:[function(require,module,exports){
+},{"assert":4}],45:[function(require,module,exports){
 var scheduler = require('nanoscheduler')()
 var assert = require('assert')
 
@@ -11113,7 +11354,7 @@ function onPerformance (cb) {
   }
 }
 
-},{"assert":29,"nanoscheduler":40}],45:[function(require,module,exports){
+},{"assert":29,"nanoscheduler":41}],46:[function(require,module,exports){
 module.exports = plucker
 
 function plucker(path, object) {
@@ -11150,7 +11391,7 @@ function pluck(path) {
   }
 }
 
-},{}],46:[function(require,module,exports){
+},{}],47:[function(require,module,exports){
 module.exports = prettierBytes
 
 function prettierBytes (num) {
@@ -11182,7 +11423,7 @@ function prettierBytes (num) {
   }
 }
 
-},{}],47:[function(require,module,exports){
+},{}],48:[function(require,module,exports){
 // shim for using process in browser
 var process = module.exports = {};
 
@@ -11368,7 +11609,7 @@ process.chdir = function (dir) {
 };
 process.umask = function() { return 0; };
 
-},{}],48:[function(require,module,exports){
+},{}],49:[function(require,module,exports){
 'use strict'
 
 /**
@@ -11397,7 +11638,7 @@ module.exports = function removeItems (arr, startIdx, removeCount) {
   arr.length = len
 }
 
-},{}],49:[function(require,module,exports){
+},{}],50:[function(require,module,exports){
 module.exports = scrollToAnchor
 
 function scrollToAnchor (anchor, options) {
@@ -11409,7 +11650,7 @@ function scrollToAnchor (anchor, options) {
   }
 }
 
-},{}],50:[function(require,module,exports){
+},{}],51:[function(require,module,exports){
 var fastSafeStringify = require('fast-safe-stringify')
 var copy = require('copy-text-to-clipboard')
 
@@ -11427,7 +11668,7 @@ function stateCopy (obj) {
 module.exports = stateCopy
 
 
-},{"copy-text-to-clipboard":22,"fast-safe-stringify":25}],51:[function(require,module,exports){
+},{"copy-text-to-clipboard":22,"fast-safe-stringify":25}],52:[function(require,module,exports){
 var assert = require('assert')
 
 module.exports = getAllRoutes
@@ -11464,7 +11705,7 @@ function getAllRoutes (router) {
   return transform(tree)
 }
 
-},{"assert":4}],52:[function(require,module,exports){
+},{"assert":4}],53:[function(require,module,exports){
 var assert = require('assert')
 var trie = require('./trie')
 
@@ -11543,7 +11784,7 @@ function Wayfarer (dft) {
   }
 }
 
-},{"./trie":53,"assert":4}],53:[function(require,module,exports){
+},{"./trie":54,"assert":4}],54:[function(require,module,exports){
 var mutate = require('xtend/mutable')
 var assert = require('assert')
 var xtend = require('xtend')
@@ -11681,7 +11922,7 @@ Trie.prototype.mount = function (route, trie) {
   }
 }
 
-},{"assert":4,"xtend":54,"xtend/mutable":55}],54:[function(require,module,exports){
+},{"assert":4,"xtend":55,"xtend/mutable":56}],55:[function(require,module,exports){
 module.exports = extend
 
 var hasOwnProperty = Object.prototype.hasOwnProperty;
@@ -11702,7 +11943,7 @@ function extend() {
     return target
 }
 
-},{}],55:[function(require,module,exports){
+},{}],56:[function(require,module,exports){
 module.exports = extend
 
 var hasOwnProperty = Object.prototype.hasOwnProperty;

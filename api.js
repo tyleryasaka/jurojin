@@ -20,20 +20,18 @@ function auth (cb) {
   })
 }
 
-function getHR (duration, bucketByTime) {
-  const now = new Date().getTime()
-  const startTime = now - duration
+function getHR (startTime, endTime, bucketByTime) {
   return window.gapi.client.request({
     method: 'POST',
     path: 'https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate',
     body: {
       aggregateBy: [{
         dataTypeName: 'com.google.heart_rate.bpm',
-        dataSourceId: 'derived:com.google.heart_rate.bpm:com.google.android.gms:merge_heart_rate_bpm'
+        dataSourceId: 'raw:com.google.heart_rate.bpm:nl.appyhapps.healthsync:HealthSync - heart rate'
       }],
       bucketByTime: { durationMillis: bucketByTime },
       startTimeMillis: startTime,
-      endTimeMillis: now
+      endTimeMillis: endTime
     }
   }).then(res => {
     return res.result.bucket.map(item => {
@@ -60,10 +58,59 @@ function getHR (duration, bucketByTime) {
   })
 }
 
-function getHRDay () {
-  const msPerHour = 3600000
-  const msPerDay = 86400000
-  return getHR(msPerDay, msPerHour)
+function getSleep (startTime, endTime) {
+  return window.gapi.client.request({
+    method: 'POST',
+    path: 'https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate',
+    body: {
+      aggregateBy: [{
+        dataTypeName: 'com.google.activity.summary',
+        dataSourceId: 'raw:com.google.activity.segment:nl.appyhapps.healthsync:'
+      }],
+      startTimeMillis: startTime,
+      endTimeMillis: endTime
+    }
+  }).then(res => {
+    const lastInBucket = res && res.result && res.result.bucket && res.result.bucket.length && res.result.bucket[res.result.bucket.length - 1]
+    const points = lastInBucket && lastInBucket.dataset && lastInBucket.dataset.length && lastInBucket.dataset[0] && lastInBucket.dataset[0].point
+    return points.map(point => {
+      const startTime = Number(point.startTimeNanos) / 1000000
+      const endTime = Number(point.endTimeNanos) / 1000000
+      const cycleCode = point &&
+        point.value &&
+        point.value.length &&
+        point.value[0] &&
+        point.value[0].intVal
+      let cycleString
+      if (cycleCode === 109) {
+        cycleString = 'light'
+      } else if (cycleCode === 110) {
+        cycleString = 'deep'
+      } else if (cycleCode === 111) {
+        cycleString = 'REM'
+      } else if (cycleCode === 112) {
+        cycleString = 'awake'
+      }
+      return cycleString && {
+        startTime,
+        endTime,
+        cycle: cycleString
+      }
+    }).filter(i => Boolean(i))
+  })
 }
 
-module.exports = { auth, getHRDay }
+function getHRDay () {
+  const msPerHour = 3600000
+  const startTime = moment().startOf('day').subtract(30, 'minutes')
+  const endTime = startTime.clone().add(1, 'day')
+  return getHR(startTime.valueOf(), endTime.valueOf(), msPerHour)
+}
+
+function getSleepDay () {
+  const startTime = moment().startOf('day').subtract(30, 'minutes')
+  const endTime = startTime.clone().add(1, 'day')
+  return getSleep(startTime.valueOf(), endTime.valueOf())
+}
+
+module.exports = { auth, getHRDay, getSleepDay }

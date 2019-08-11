@@ -1,8 +1,8 @@
 var html = require('choo/html')
 var devtools = require('choo-devtools')
 var choo = require('choo')
-var { auth, getHRDay } = require('./api')
-var { hrChart } = require('./charts')
+var { auth, getHRDay, getSleepDay } = require('./api')
+var { hrChart, sleepChart } = require('./charts')
 
 var app = choo()
 app.use(devtools())
@@ -12,17 +12,22 @@ app.mount('#choo')
 
 function loadData (emitter) {
   Promise.all([
-    getHRDay()
+    getHRDay(),
+    getSleepDay()
   ]).then(data => {
     emitter.emit('receiveData', {
-      bpm: data[0]
+      bpm: data[0],
+      cycles: data[1]
     })
   })
 }
 
 function mainView (state, emit) {
   return html`
-    <div class="ct-chart ct-perfect-fourth"></div>
+    <div>
+      <div class="ct-chart ct-chart-hr ct-major-eleventh"></div>
+      <div class="ct-chart ct-chart-sleep ct-major-eleventh"></div>
+    </div>
   `
 }
 
@@ -33,8 +38,8 @@ function globalStore (state, emitter) {
     })
   })
 
-  emitter.on('receiveData', function ({ bpm }) {
-    console.log('bpm', bpm)
+  emitter.on('receiveData', function ({ bpm, cycles }) {
     hrChart(bpm)
+    sleepChart(cycles)
   })
 }

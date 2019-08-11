@@ -1,7 +1,9 @@
 var moment = require('moment')
 
 function hrChart (bpm) {
-  return new window.Chartist.Line('.ct-chart', {
+  const startOfToday = moment().startOf('day')
+  const endOfToday = startOfToday.clone().add(1, 'day')
+  return new window.Chartist.Line('.ct-chart-hr', {
     series: [
       {
         name: 'bpm-max',
@@ -32,12 +34,14 @@ function hrChart (bpm) {
       }
     ]
   }, {
-    low: 25,
-    high: 175,
+    // low: 25,
+    // high: 175,
     axisX: {
       type: window.Chartist.FixedScaleAxis,
-      divisor: 24,
-      labelInterpolationFnc: function (value) {
+      low: startOfToday.valueOf(),
+      high: endOfToday.valueOf(),
+      divisor: 6,
+      labelInterpolationFnc: function (value, check) {
         return moment(value).format('ha')
       }
     },
@@ -48,4 +52,52 @@ function hrChart (bpm) {
   })
 }
 
-module.exports = { hrChart }
+function sleepChart (cycles) {
+  const startOfToday = moment().startOf('day')
+  const endOfToday = startOfToday.clone().add(1, 'day')
+  const genSeries = (cycleName) => {
+    return {
+      name: cycleName,
+      data: cycles.filter(({ cycle }) => cycle === cycleName).map(({ startTime, endTime }) => {
+        return [{
+          x: startTime,
+          y: 1
+        }, {
+          x: endTime,
+          y: 0
+        }]
+      }).flat()
+    }
+  }
+  return new window.Chartist.Line('.ct-chart-sleep', {
+    series: [
+      genSeries('light'),
+      genSeries('deep'),
+      genSeries('REM'),
+      genSeries('awake')
+    ]
+  }, {
+    // low: 25,
+    // high: 175,
+    axisX: {
+      type: window.Chartist.FixedScaleAxis,
+      low: startOfToday.valueOf(),
+      high: endOfToday.valueOf(),
+      divisor: 6,
+      labelInterpolationFnc: function (value, check) {
+        return moment(value).format('ha')
+      }
+    },
+    axisY: {
+      labelInterpolationFnc: () => {
+        return false
+      }
+    },
+    lineSmooth: window.Chartist.Interpolation.step(),
+    showPoint: false,
+    showArea: true,
+    showLine: false
+  })
+}
+
+module.exports = { hrChart, sleepChart }

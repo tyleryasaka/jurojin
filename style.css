@@ -1,5 +1,15 @@
 html {
   font-family: Roboto;
+  background: #111;
+}
+
+.ct-label {
+  color: rgba(255,255,255,0.4);
+  fill: rgba(255,255,255,0.4);
+}
+
+footer {
+  text-align: center;
 }
 
 h1, h2 {
@@ -8,20 +18,49 @@ h1, h2 {
 }
 
 h1 {
-  margin-bottom: 0;
-  color: #444;
+  /* margin-bottom: 0; */
+  color: #ccc;
+  display: inline-block;
+  border: 1px #ccc solid;
+  padding: 0 2px;
+  font-size: 0.5em;
 }
 
 h2 {
   font-size: 1.2em;
-  color: #ccc;
+  color: #666;
   margin-top: 5px;
 }
 
-.ct-series-c .ct-line, .ct-series-c .ct-point {
+.ct-chart {
+  max-width: 800px;
+  margin: auto;
+}
+
+.ct-chart-hr .ct-series-c .ct-line, .ct-chart-hr .ct-series-c .ct-point {
   stroke: #F21010;
 }
 
-.ct-series-a .ct-line, .ct-series-b .ct-line {
+.ct-chart-hr .ct-series-a .ct-line, .ct-chart-hr .ct-series-b .ct-line {
   stroke: #EBD0D0;
+}
+
+.ct-chart-sleep .ct-area {
+  fill-opacity: 1;
+}
+
+.ct-chart-sleep .ct-series-a .ct-area {
+  fill: #CCA5ED; /* light */
+}
+
+.ct-chart-sleep .ct-series-b .ct-area {
+  fill: #571FA5; /* deep */
+}
+
+.ct-chart-sleep .ct-series-c .ct-area {
+  fill: #B070E0; /* REM */
+}
+
+.ct-chart-sleep .ct-series-d .ct-area {
+  fill: rgba(0,0,0,0); /* awake */
 }
